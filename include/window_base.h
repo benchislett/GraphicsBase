@@ -15,18 +15,12 @@ class WindowManagerBase {
     InitWindow(winWidth, winHeight, winTitle.c_str());
     rlImGuiSetup(true);
     initImpl();
-    setFpsLimit(fps);
+    SetTargetFPS(fps);
   }
 
   ~WindowManagerBase() {
     rlImGuiShutdown();
     CloseWindow();
-  }
-
-  int getFpsLimit() const { return fpsLimit; };
-  void setFpsLimit(int fps) {
-    fpsLimit = fps;
-    SetTargetFPS(fps);
   }
 
   int getWinWidth() const { return winWidth; }
@@ -44,9 +38,9 @@ class WindowManagerBase {
   }
 
   virtual void loopImpl() { return; }
-
+  virtual void preDrawImpl() { return; }
   virtual void drawImpl() { return; }
-
+  virtual void postDrawImpl() { return; }
   virtual void drawImGuiImpl() { return; }
 
  private:
@@ -62,18 +56,18 @@ class WindowManagerBase {
   void drawImGuiEnd() const { rlImGuiEnd(); }
 
   void draw() {
+    preDrawImpl();
     drawBegin();
     drawImpl();
     drawImGuiBegin();
     drawImGuiImpl();
     drawImGuiEnd();
     drawEnd();
+    postDrawImpl();
   }
 
   int winWidth;
   int winHeight;
-
-  int fpsLimit;
 
   unsigned long long int frameid;
 };
