@@ -33,7 +33,6 @@ class WindowManagerBase {
       draw();
       loopImpl();
       frameid++;
-      { unsigned long long int frameid; }
     }
   }
 
