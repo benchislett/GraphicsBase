@@ -1,3 +1,5 @@
 {
-    "editor.formatOnSave": true
+    "editor.formatOnSave": true,
+    "cmake.buildDirectory": "${workspaceFolder}/example/build",
+    "cmake.sourceDirectory": "${workspaceFolder}/example"
 }

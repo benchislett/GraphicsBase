@@ -1,3 +1,4 @@
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -73,80 +74,147 @@ class WindowManagerBase {
   unsigned long long int frameid;
 };
 
-constexpr int IMAGE_WIDTH = 128;
+template <typename T, class Colorizer>
+struct SimpleGrid {
+  int width, height;
+  std::vector<T> data;
+  std::vector<Color> imageBuffer;
 
-class ConfigWindow : public WindowManagerBase {
- public:
-  ConfigWindow(int w, int h, const std::string& winTitle, int fps = 60)
-      : WindowManagerBase(w, h, winTitle, fps), hostImageBuffer{} {
-    hostImageBuffer.resize(IMAGE_WIDTH * IMAGE_WIDTH);
-    im = {.data = (void*)hostImageBuffer.data(),  // sharing host data, no need
-                                                  // to deallocate this Image
-          .width = IMAGE_WIDTH,
-          .height = IMAGE_WIDTH,
-          .mipmaps = 1,
-          .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8};
-
-    camera = {.offset = {0.f, 0.f},
-              .rotation = 0.f,
-              .target = {0.f, 0.f},
-              .zoom = 1.f};
-    // camera = {0};
-    // camera.zoom = 1.0f;
+  SimpleGrid(int w, int h) : width(w), height(h) {
+    data.resize(width * height, T());
+    imageBuffer.resize(width * height, WHITE);
   }
 
-  void drawImGuiImpl() override {
-    ImGui::Begin("Config", &guiIsOpen);
+  const T& get(int x, int y) const { return get(y * width + x); }
+  const T& get(int idx) const { return data[idx]; }
 
-    ImGui::Text("FPS: %d", GetFPS());
+  void set(int x, int y, const T& value) { set(y * width + x, value); }
+  void set(int idx, const T& value) {
+    data[idx] = value;
+    imageBuffer[idx] = Colorizer::colorize(value);
+  }
+};
 
+struct CameraModule {
+  Camera2D camera;
+  CameraModule()
+      : camera{.offset = {0, 0},
+               .target = {0, 0},
+               .rotation = 0.0f,
+               .zoom = 1.0f} {}
+
+  void updateCamera() {
     if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
       Vector2 delta = GetMouseDelta();
       delta = Vector2Scale(delta, -1.0f / camera.zoom);
-
       camera.target = Vector2Add(camera.target, delta);
     }
 
-    // Zoom based on mouse wheel
     float wheel = GetMouseWheelMove();
     if (wheel != 0) {
-      // Get the world point that is under the mouse
       Vector2 mouseWorldPos = GetScreenToWorld2D(GetMousePosition(), camera);
 
-      // Set the offset to where the mouse is
       camera.offset = GetMousePosition();
-
-      // Set the target to match, so that the camera maps the world space point
-      // under the cursor to the screen space point under the cursor at any zoom
       camera.target = mouseWorldPos;
 
-      // Zoom increment
       const float zoomIncrement = 0.125f;
-
-      camera.zoom += (wheel * zoomIncrement);
-      if (camera.zoom < zoomIncrement) camera.zoom = zoomIncrement;
+      camera.zoom =
+          std::max(camera.zoom + (wheel * zoomIncrement), zoomIncrement);
     }
+  }
+};
 
+struct ImguiFPS {
+  void draw() {
+    ImGui::Begin("FPS", &guiIsOpen);
+    ImGui::Text("FPS: %d", GetFPS());
     ImGui::End();
   }
 
-  void loopImpl() override {}
+  bool guiIsOpen;
+};
+
+template <typename T, typename Colorizer>
+class SimpleGridWindow : public WindowManagerBase {
+  using Grid = SimpleGrid<T, Colorizer>;
+
+ public:
+  SimpleGridWindow(int w, int h, const std::string& winTitle, int fps,
+                   std::function<void(void)> t, std::shared_ptr<Grid> g)
+      : WindowManagerBase(w, h, winTitle, fps),
+        tick(t),
+        grid(std::move(g)),
+        gui{false} {
+    im = {.data = nullptr,
+          .width = w,
+          .height = h,
+          .mipmaps = 1,
+          .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8};
+  }
+
+  void drawImGuiImpl() override { gui.draw(); }
+
+  void loopImpl() override { tick(); }
 
   void preDrawImpl() override {
-    for (int y = 0; y < 128; y++) {
-      for (int x = 0; x < 128; x++) {
-        hostImageBuffer[y * 128 + x] =
-            (((x + frameid / 4) % 4) ^ (y % 4)) ? WHITE : BLACK;
-      }
-    }
-
-    // im's memory should point to hostImageBuffer
+    im.data = (void*)grid->imageBuffer.data();
     tex = LoadTextureFromImage(im);
   }
 
   void drawImpl() override {
     ClearBackground(WHITE);
-    BeginMode2D(camera);
+    DrawTexture(tex, 0, 0, WHITE);
+  }
+
+  void postDrawImpl() override { UnloadTexture(tex); }
+
+ private:
+  ImguiFPS gui;
+
+  Image im;
+  Texture2D tex;
+
+  std::function<void(void)> tick;
+  std::shared_ptr<Grid> grid;
+};
+
+template <typename Grid, typename Colorizer>
+class DynamicGridWindow : public WindowManagerBase {
+ public:
+  DynamicGridWindow(int w, int h, const std::string& winTitle, int fps,
+                    std::function<void(void)> t, std::shared_ptr<Grid> g)
+      : WindowManagerBase(w, h, winTitle, fps),
+        tick(t),
+        grid(std::move(g)),
+        gui{false},
+        camera() {
+    buffer.resize(w * h, WHITE);
+    im = {.data = buffer.data(),
+          .width = w,
+          .height = h,
+          .mipmaps = 1,
+          .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8};
+  }
+
+  void drawImGuiImpl() override { gui.draw(); }
+
+  void loopImpl() override { tick(); }
+
+  void preDrawImpl() override {
+    for (int x = 0; x < im.width; x++) {
+      for (int y = 0; y < im.height; y++) {
+        Color res = Colorizer::colorize(grid->get(x, y));
+        buffer[y * im.width + x] = res;
+      }
+    }
+    im.data = (void*)buffer.data();
+    tex = LoadTextureFromImage(im);
+    camera.updateCamera();
+  }
+
+  void drawImpl() override {
+    ClearBackground(WHITE);
+    BeginMode2D(camera.camera);
     DrawTexture(tex, 0, 0, WHITE);
     EndMode2D();
   }
@@ -154,12 +222,13 @@ class ConfigWindow : public WindowManagerBase {
   void postDrawImpl() override { UnloadTexture(tex); }
 
  private:
-  bool guiIsOpen;
+  ImguiFPS gui;
 
+  CameraModule camera;
+  std::vector<Color> buffer;
   Image im;
   Texture2D tex;
 
-  Camera2D camera;
-
-  std::vector<Color> hostImageBuffer;
+  std::function<void(void)> tick;
+  std::shared_ptr<Grid> grid;
 };
