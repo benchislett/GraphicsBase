@@ -1,4 +1,5 @@
 #include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -145,7 +146,7 @@ struct TiledGrid {
     it->second.data[idx_y * tile_size + idx_x] = value;
   }
 
- private:
+ protected:
   std::map<std::pair<int, int>, Tile> tiles;
 };
 
@@ -170,6 +171,15 @@ struct GraphicalTiledGrid : TiledGrid<T, tile_size> {
     bool dirty;
     bool loaded;
   };
+
+  void clear() {
+    for (auto& [_, tile] : imageTiles) {
+      UnloadTexture(tile.tex);
+      free(tile.data);
+    }
+    imageTiles.clear();
+    TiledGrid<T, tile_size>::tiles.clear();
+  }
 
   void set(int x, int y, const T& value) {
     auto [_, __, idx_x, idx_y] = TiledGrid<T, tile_size>::indexDecomp(x, y);
@@ -263,16 +273,6 @@ struct CameraModule {
   }
 };
 
-struct ImguiFPS {
-  void draw() {
-    ImGui::Begin("FPS", &guiIsOpen);
-    ImGui::Text("FPS: %d", GetFPS());
-    ImGui::End();
-  }
-
-  bool guiIsOpen;
-};
-
 template <typename T, class Colorizer>
 class SimpleGridWindow : public WindowManagerBase {
   using Grid = SimpleGrid<T, Colorizer>;
@@ -280,10 +280,7 @@ class SimpleGridWindow : public WindowManagerBase {
  public:
   SimpleGridWindow(int w, int h, const std::string& winTitle, int fps,
                    std::function<void(void)> t, std::shared_ptr<Grid> g)
-      : WindowManagerBase(w, h, winTitle, fps),
-        tick(t),
-        grid(std::move(g)),
-        gui{false} {
+      : WindowManagerBase(w, h, winTitle, fps), tick(t), grid(std::move(g)) {
     im = {.data = nullptr,
           .width = w,
           .height = h,
@@ -291,7 +288,7 @@ class SimpleGridWindow : public WindowManagerBase {
           .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8};
   }
 
-  void drawImGuiImpl() override { gui.draw(); }
+  void drawImGuiImpl() override {}
 
   void loopImpl() override { tick(); }
 
@@ -308,8 +305,6 @@ class SimpleGridWindow : public WindowManagerBase {
   void postDrawImpl() override { UnloadTexture(tex); }
 
  private:
-  ImguiFPS gui;
-
   Image im;
   Texture2D tex;
 
@@ -323,7 +318,7 @@ class DynamicGridWindow : public WindowManagerBase {
 
  public:
   DynamicGridWindow(int w, int h, const std::string& winTitle, int fps)
-      : WindowManagerBase(w, h, winTitle, fps), grid{}, gui{false}, camera() {
+      : WindowManagerBase(w, h, winTitle, fps), grid{}, camera(), runtime() {
     int im_w = static_cast<int>(w) + 2 * tile_size;
     int im_h = static_cast<int>(h) + 2 * tile_size;
     buffer.resize(im_w * im_h, WHITE);
@@ -334,11 +329,9 @@ class DynamicGridWindow : public WindowManagerBase {
           .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8};
   }
 
-  void drawImGuiImpl() override { gui.draw(); }
+  void drawImGuiImpl() override { runtime.drawGui(); }
 
-  void loopImpl() override {
-    Runtime<GraphicalTiledGrid<T, Colorizer, tile_size>>::tick(grid);
-  }
+  void loopImpl() override { runtime.tick(grid); }
 
   void preDrawImpl() override {
     camera.updateCamera();
@@ -392,8 +385,6 @@ class DynamicGridWindow : public WindowManagerBase {
   void postDrawImpl() override {}
 
  private:
-  ImguiFPS gui;
-
   CameraModule camera;
 
   GraphicalTiledGrid<T, Colorizer, tile_size> grid;
@@ -401,4 +392,6 @@ class DynamicGridWindow : public WindowManagerBase {
   std::vector<Color> buffer;
   Image im;
   Texture2D tex;
+
+  Runtime<GraphicalTiledGrid<T, Colorizer, tile_size>> runtime;
 };

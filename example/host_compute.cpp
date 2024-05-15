@@ -32,13 +32,15 @@ struct IntColorizer {
 
 template <class Grid>
 struct Runtime {
-  static void tick(Grid &grid) {
+  void tick(Grid &grid) {
     for (int x = -128; x < 128; x++) {
       for (int y = -128; y < 128; y++) {
         grid.set(x, y, proper_mod(x + y, 10));
       }
     }
   }
+
+  void drawGui() {}
 };
 
 constexpr int width = 1500;
