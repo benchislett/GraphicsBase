@@ -1,0 +1,16 @@
+{
+    "configurations": [
+        {
+            "name": "(lldb) Launch",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/example/build/host_compute",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/example/build",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb"
+        }
+    ]
+}
