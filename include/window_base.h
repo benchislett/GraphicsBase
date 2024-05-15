@@ -95,6 +95,16 @@ struct SimpleGrid {
   }
 };
 
+int div_round_negative(int a, int b) {
+  if (a >= 0) {
+    return a / b;
+  } else {
+    return -1 - (-1 - a) / b;
+  }
+}
+
+int proper_mod(int a, int b) { return (a % b + b) % b; }
+
 template <typename T, int tile_size>
 struct TiledGrid {
   struct Tile {
@@ -108,10 +118,10 @@ struct TiledGrid {
   };
 
   static std::tuple<int, int, int, int> indexDecomp(int x, int y) {
-    int tile_x = (x >= 0) ? x / tile_size : -1 - (-1 - x) / tile_size;
-    int tile_y = (y >= 0) ? y / tile_size : -1 - (-1 - y) / tile_size;
-    int idx_x = (x >= 0) ? (x % tile_size) : -(x % tile_size);
-    int idx_y = (y >= 0) ? (y % tile_size) : -(y % tile_size);
+    int tile_x = div_round_negative(x, tile_size);
+    int tile_y = div_round_negative(y, tile_size);
+    int idx_x = proper_mod(x, tile_size);
+    int idx_y = proper_mod(y, tile_size);
     return std::make_tuple(tile_x, tile_y, idx_x, idx_y);
   }
 
