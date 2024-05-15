@@ -161,7 +161,7 @@ struct CameraModule {
       camera.offset = GetMousePosition();
       camera.target = mouseWorldPos;
 
-      const float zoomIncrement = 0.125f;
+      const float zoomIncrement = 1.f;
       camera.zoom =
           std::max(camera.zoom + (wheel * zoomIncrement), zoomIncrement);
     }
@@ -224,6 +224,8 @@ class SimpleGridWindow : public WindowManagerBase {
 
 template <typename Grid, typename Colorizer>
 class DynamicGridWindow : public WindowManagerBase {
+  static constexpr int tile_size = 16;
+
  public:
   DynamicGridWindow(int w, int h, const std::string& winTitle, int fps,
                     std::function<void(void)> t, std::shared_ptr<Grid> g)
@@ -232,10 +234,12 @@ class DynamicGridWindow : public WindowManagerBase {
         grid(std::move(g)),
         gui{false},
         camera() {
-    buffer.resize(w * h, WHITE);
+    int im_w = static_cast<int>(w) + 2 * tile_size;
+    int im_h = static_cast<int>(h) + 2 * tile_size;
+    buffer.resize(im_w * im_h, WHITE);
     im = {.data = buffer.data(),
-          .width = w,
-          .height = h,
+          .width = im_w,
+          .height = im_h,
           .mipmaps = 1,
           .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8};
   }
@@ -245,21 +249,30 @@ class DynamicGridWindow : public WindowManagerBase {
   void loopImpl() override { tick(); }
 
   void preDrawImpl() override {
+    camera.updateCamera();
+    Vector2 dxy = GetScreenToWorld2D({0, 0}, camera.camera);
+    int x_start = static_cast<int>(dxy.x);
+    int y_start = static_cast<int>(dxy.y);
+
     for (int x = 0; x < im.width; x++) {
       for (int y = 0; y < im.height; y++) {
-        Color res = Colorizer::colorize(grid->get(x, y));
+        Color res = Colorizer::colorize(
+            grid->get(x + x_start - tile_size, y + y_start - tile_size));
         buffer[y * im.width + x] = res;
       }
     }
     im.data = (void*)buffer.data();
     tex = LoadTextureFromImage(im);
-    camera.updateCamera();
   }
 
   void drawImpl() override {
+    Vector2 dxy = GetScreenToWorld2D({0, 0}, camera.camera);
+    int x_start = static_cast<int>(dxy.x);
+    int y_start = static_cast<int>(dxy.y);
+
     ClearBackground(WHITE);
     BeginMode2D(camera.camera);
-    DrawTexture(tex, 0, 0, WHITE);
+    DrawTexture(tex, x_start - tile_size, y_start - tile_size, WHITE);
     EndMode2D();
   }
 
@@ -269,10 +282,11 @@ class DynamicGridWindow : public WindowManagerBase {
   ImguiFPS gui;
 
   CameraModule camera;
-  std::vector<Color> buffer;
-  Image im;
-  Texture2D tex;
 
   std::function<void(void)> tick;
   std::shared_ptr<Grid> grid;
+
+  std::vector<Color> buffer;
+  Image im;
+  Texture2D tex;
 };
