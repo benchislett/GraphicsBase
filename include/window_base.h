@@ -95,6 +95,50 @@ struct SimpleGrid {
   }
 };
 
+template <typename T, int tile_size>
+struct TiledGrid {
+  struct Tile {
+    Tile() {
+      for (int i = 0; i < tile_size * tile_size; i++) {
+        data[i] = T();
+      }
+    }
+
+    T data[tile_size * tile_size];
+  };
+
+  static std::tuple<int, int, int, int> indexDecomp(int x, int y) {
+    int tile_x = (x >= 0) ? x / tile_size : -1 - (-1 - x) / tile_size;
+    int tile_y = (y >= 0) ? y / tile_size : -1 - (-1 - y) / tile_size;
+    int idx_x = (x >= 0) ? (x % tile_size) : -(x % tile_size);
+    int idx_y = (y >= 0) ? (y % tile_size) : -(y % tile_size);
+    return std::make_tuple(tile_x, tile_y, idx_x, idx_y);
+  }
+
+  T get(int x, int y) const {
+    auto [tileid_x, tileid_y, idx_x, idx_y] = indexDecomp(x, y);
+    auto it = tiles.find({tileid_x, tileid_y});
+    if (it == tiles.end()) {
+      return T();
+    }
+
+    return it->second.data[idx_y * tile_size + idx_x];
+  }
+
+  void set(int x, int y, const T& value) {
+    auto [tileid_x, tileid_y, idx_x, idx_y] = indexDecomp(x, y);
+    auto it = tiles.find({tileid_x, tileid_y});
+    if (it == tiles.end()) {
+      it = tiles.insert({{tileid_x, tileid_y}, Tile()}).first;
+    }
+
+    it->second.data[idx_y * tile_size + idx_x] = value;
+  }
+
+ private:
+  std::map<std::pair<int, int>, Tile> tiles;
+};
+
 struct CameraModule {
   Camera2D camera;
   CameraModule()
