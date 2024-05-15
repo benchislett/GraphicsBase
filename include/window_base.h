@@ -149,6 +149,91 @@ struct TiledGrid {
   std::map<std::pair<int, int>, Tile> tiles;
 };
 
+template <typename T, class Colorizer, int tile_size>
+struct GraphicalTiledGrid : TiledGrid<T, tile_size> {
+  struct ImageTile {
+    ImageTile() : dirty(true), loaded(false) {
+      data = (Color*)malloc(tile_size * tile_size * sizeof(Color));
+      for (int i = 0; i < tile_size * tile_size; i++) {
+        data[i] = Colorizer::colorize(T());
+      }
+      im = {.data = &data[0],
+            .width = tile_size,
+            .height = tile_size,
+            .mipmaps = 2,
+            .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8};
+    }
+
+    Color* data;
+    Image im;
+    Texture2D tex;
+    bool dirty;
+    bool loaded;
+  };
+
+  void set(int x, int y, const T& value) {
+    auto [_, __, idx_x, idx_y] = TiledGrid<T, tile_size>::indexDecomp(x, y);
+    TiledGrid<T, tile_size>::set(x, y, value);
+    ImageTile& tile = get_image_tile(x, y);
+
+    tile.data[idx_y * tile_size + idx_x] = Colorizer::colorize(value);
+    tile.dirty = true;
+  }
+
+  void load_tile_at(int x, int y) {
+    if (!has_tile(x, y)) {
+      return;
+    }
+    ImageTile& tile = get_image_tile(x, y);
+    if (!tile.loaded) {
+      tile.tex = LoadTextureFromImage(tile.im);
+      tile.loaded = true;
+    }
+    if (tile.dirty) {
+      UpdateTexture(tile.tex, tile.im.data);
+      GenTextureMipmaps(&tile.tex);
+      SetTextureFilter(tile.tex, TEXTURE_FILTER_POINT);
+    }
+  }
+
+  void draw_tile_at(int x, int y) {
+    if (!has_tile(x, y)) {
+      return;
+    }
+    ImageTile& tile = get_image_tile(x, y);
+    DrawTexture(tile.tex, x, y, WHITE);
+  }
+
+  void unload_tile_at(int x, int y) {
+    if (!has_tile(x, y)) {
+      return;
+    }
+    ImageTile& tile = get_image_tile(x, y);
+    UnloadTexture(tile.tex);
+    tile.loaded = false;
+  }
+
+ private:
+  ImageTile& get_image_tile(int x, int y) {
+    auto [tileid_x, tileid_y, _, __] =
+        TiledGrid<T, tile_size>::indexDecomp(x, y);
+    auto it = imageTiles.find({tileid_x, tileid_y});
+    if (it == imageTiles.end()) {
+      it = imageTiles.insert({{tileid_x, tileid_y}, ImageTile()}).first;
+    }
+
+    return it->second;
+  }
+
+  bool has_tile(int x, int y) {
+    auto [tileid_x, tileid_y, _, __] =
+        TiledGrid<T, tile_size>::indexDecomp(x, y);
+    return imageTiles.find({tileid_x, tileid_y}) != imageTiles.end();
+  }
+
+  std::map<std::pair<int, int>, ImageTile> imageTiles;
+};
+
 struct CameraModule {
   Camera2D camera;
   CameraModule()
@@ -171,7 +256,7 @@ struct CameraModule {
       camera.offset = GetMousePosition();
       camera.target = mouseWorldPos;
 
-      const float zoomIncrement = 1.f;
+      const float zoomIncrement = 0.125f;
       camera.zoom =
           std::max(camera.zoom + (wheel * zoomIncrement), zoomIncrement);
     }
@@ -188,7 +273,7 @@ struct ImguiFPS {
   bool guiIsOpen;
 };
 
-template <typename T, typename Colorizer>
+template <typename T, class Colorizer>
 class SimpleGridWindow : public WindowManagerBase {
   using Grid = SimpleGrid<T, Colorizer>;
 
@@ -232,18 +317,13 @@ class SimpleGridWindow : public WindowManagerBase {
   std::shared_ptr<Grid> grid;
 };
 
-template <typename Grid, typename Colorizer>
+template <template <class _> class Runtime, typename T, class Colorizer>
 class DynamicGridWindow : public WindowManagerBase {
-  static constexpr int tile_size = 16;
+  static constexpr int tile_size = 128;
 
  public:
-  DynamicGridWindow(int w, int h, const std::string& winTitle, int fps,
-                    std::function<void(void)> t, std::shared_ptr<Grid> g)
-      : WindowManagerBase(w, h, winTitle, fps),
-        tick(t),
-        grid(std::move(g)),
-        gui{false},
-        camera() {
+  DynamicGridWindow(int w, int h, const std::string& winTitle, int fps)
+      : WindowManagerBase(w, h, winTitle, fps), grid{}, gui{false}, camera() {
     int im_w = static_cast<int>(w) + 2 * tile_size;
     int im_h = static_cast<int>(h) + 2 * tile_size;
     buffer.resize(im_w * im_h, WHITE);
@@ -256,45 +336,67 @@ class DynamicGridWindow : public WindowManagerBase {
 
   void drawImGuiImpl() override { gui.draw(); }
 
-  void loopImpl() override { tick(); }
+  void loopImpl() override {
+    Runtime<GraphicalTiledGrid<T, Colorizer, tile_size>>::tick(grid);
+  }
 
   void preDrawImpl() override {
     camera.updateCamera();
     Vector2 dxy = GetScreenToWorld2D({0, 0}, camera.camera);
-    int x_start = static_cast<int>(dxy.x);
-    int y_start = static_cast<int>(dxy.y);
+    int x_start =
+        div_round_negative(static_cast<int>(dxy.x), tile_size) * tile_size;
+    int y_start =
+        div_round_negative(static_cast<int>(dxy.y), tile_size) * tile_size;
 
-    for (int x = 0; x < im.width; x++) {
-      for (int y = 0; y < im.height; y++) {
-        Color res = Colorizer::colorize(
-            grid->get(x + x_start - tile_size, y + y_start - tile_size));
-        buffer[y * im.width + x] = res;
+    dxy = GetScreenToWorld2D(
+        {(float)GetScreenWidth(), (float)GetScreenHeight()}, camera.camera);
+    int x_end =
+        div_round_negative(static_cast<int>(dxy.x), tile_size) * tile_size +
+        tile_size;
+    int y_end =
+        div_round_negative(static_cast<int>(dxy.y), tile_size) * tile_size +
+        tile_size;
+    int drawn = 0;
+    for (int x = x_start; x < x_end; x += tile_size) {
+      for (int y = y_start; y < y_end; y += tile_size) {
+        grid.load_tile_at(x, y);
       }
     }
-    im.data = (void*)buffer.data();
-    tex = LoadTextureFromImage(im);
   }
 
   void drawImpl() override {
     Vector2 dxy = GetScreenToWorld2D({0, 0}, camera.camera);
-    int x_start = static_cast<int>(dxy.x);
-    int y_start = static_cast<int>(dxy.y);
+    int x_start =
+        div_round_negative(static_cast<int>(dxy.x), tile_size) * tile_size;
+    int y_start =
+        div_round_negative(static_cast<int>(dxy.y), tile_size) * tile_size;
+    dxy = GetScreenToWorld2D(
+        {(float)GetScreenWidth(), (float)GetScreenHeight()}, camera.camera);
+    int x_end =
+        div_round_negative(static_cast<int>(dxy.x), tile_size) * tile_size +
+        tile_size;
+    int y_end =
+        div_round_negative(static_cast<int>(dxy.y), tile_size) * tile_size +
+        tile_size;
 
-    ClearBackground(WHITE);
+    ClearBackground(Colorizer::colorize(T()));
     BeginMode2D(camera.camera);
-    DrawTexture(tex, x_start - tile_size, y_start - tile_size, WHITE);
+    for (int x = x_start; x < x_end; x += tile_size) {
+      for (int y = y_start; y < y_end; y += tile_size) {
+        grid.draw_tile_at(x, y);
+      }
+    }
     EndMode2D();
   }
 
-  void postDrawImpl() override { UnloadTexture(tex); }
+  void postDrawImpl() override {}
 
  private:
   ImguiFPS gui;
 
   CameraModule camera;
 
-  std::function<void(void)> tick;
-  std::shared_ptr<Grid> grid;
+  GraphicalTiledGrid<T, Colorizer, tile_size> grid;
 
   std::vector<Color> buffer;
   Image im;

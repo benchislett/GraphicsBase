@@ -30,6 +30,17 @@ struct IntColorizer {
   }
 };
 
+template <class Grid>
+struct Runtime {
+  static void tick(Grid &grid) {
+    for (int x = -128; x < 128; x++) {
+      for (int y = -128; y < 128; y++) {
+        grid.set(x, y, proper_mod(x + y, 10));
+      }
+    }
+  }
+};
+
 constexpr int width = 1500;
 constexpr int height = 800;
 
@@ -51,17 +62,8 @@ int main() {
   // SimpleGridWindow window(width, height, "Test Window", 0, tick, grid);
 
   // dynamic grid window example
-  auto grid = std::make_shared<TiledGrid<int, 16>>();
-  auto tick = [&]() {
-    for (int x = -128; x < 128; x++) {
-      for (int y = -128; y < 128; y++) {
-        grid->set(x, y, (std::abs(x) + std::abs(y)) % 10);
-      }
-    }
-  };
-
-  DynamicGridWindow<TiledGrid<int, 16>, IntColorizer> window(
-      width, height, "Test Window", 0, tick, grid);
+  DynamicGridWindow<Runtime, int, IntColorizer> window(width, height,
+                                                       "Test Window", 0);
   window.loop();
   return 0;
 }
