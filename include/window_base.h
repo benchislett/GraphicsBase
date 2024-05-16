@@ -2,6 +2,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <memory>
 
 #include "imgui.h"
 #include "imgui_stdlib.h"
